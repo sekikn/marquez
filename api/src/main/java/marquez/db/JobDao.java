@@ -35,7 +35,7 @@ import org.postgresql.util.PGobject;
 @RegisterRowMapper(JobMapper.class)
 public interface JobDao extends BaseDao {
   @SqlQuery(
-      "SELECT EXISTS (SELECT 1 FROM jobs AS j "
+      "SELECT EXISTS (SELECT 1 FROM jobs_view AS j "
           + "WHERE j.namespace_name= :namespaceName AND "
           + " j.name = :jobName)")
   boolean exists(String namespaceName, String jobName);
@@ -49,7 +49,7 @@ public interface JobDao extends BaseDao {
 
   @SqlQuery(
       "SELECT j.*, jc.context, f.facets\n"
-          + "  FROM jobs AS j\n"
+          + "  FROM jobs_view AS j\n"
           + "  LEFT OUTER JOIN job_versions AS jv ON jv.uuid = j.current_version_uuid\n"
           + "  LEFT OUTER JOIN job_contexts jc ON jc.uuid = j.current_job_context_uuid\n"
           + "  LEFT OUTER JOIN (\n"
@@ -58,7 +58,7 @@ public interface JobDao extends BaseDao {
           + "       SELECT run_uuid, event->'job'->'facets' AS facets\n"
           + "       FROM lineage_events AS le\n"
           + "       INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=le.run_uuid\n"
-          + "       INNER JOIN jobs j2 ON j2.current_version_uuid=jv2.uuid\n"
+          + "       INNER JOIN jobs_view j2 ON j2.current_version_uuid=jv2.uuid\n"
           + "       WHERE j2.name=:jobName AND j2.namespace_name=:namespaceName\n"
           + "       ORDER BY event_time ASC\n"
           + "   ) e\n"
@@ -78,16 +78,24 @@ public interface JobDao extends BaseDao {
   }
 
   @SqlQuery(
-      "SELECT j.*, n.name AS namespace_name FROM jobs AS j "
-          + "INNER JOIN namespaces AS n "
-          + "  ON (n.name = :namespaceName AND "
-          + "      j.namespace_uuid = n.uuid AND "
-          + "      j.name = :jobName)")
+      """
+          SELECT j.* FROM jobs_view AS j
+          WHERE j.namespace_name = :namespaceName AND
+          j.name = :jobName
+      """)
   Optional<JobRow> findJobByNameAsRow(String namespaceName, String jobName);
 
   @SqlQuery(
+      """
+          SELECT j.* FROM jobs AS j
+          WHERE j.namespace_name = :namespaceName AND
+          j.name = :jobName
+      """)
+  Optional<JobRow> findJobBySimpleNameAsRow(String namespaceName, String jobName);
+
+  @SqlQuery(
       "SELECT j.*, jc.context, f.facets\n"
-          + "  FROM jobs AS j\n"
+          + "  FROM jobs_view AS j\n"
           + "  LEFT OUTER JOIN job_versions AS jv ON jv.uuid = j.current_version_uuid\n"
           + "  LEFT OUTER JOIN job_contexts jc ON jc.uuid = j.current_job_context_uuid\n"
           + "LEFT OUTER JOIN (\n"
@@ -96,7 +104,7 @@ public interface JobDao extends BaseDao {
           + "       SELECT run_uuid, event->'job'->'facets' AS facets\n"
           + "       FROM lineage_events AS le\n"
           + "       INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=le.run_uuid\n"
-          + "       INNER JOIN jobs j2 ON j2.current_version_uuid=jv2.uuid\n"
+          + "       INNER JOIN jobs_view j2 ON j2.current_version_uuid=jv2.uuid\n"
           + "       WHERE j2.namespace_name=:namespaceName\n"
           + "       ORDER BY event_time ASC\n"
           + "   ) e\n"
@@ -107,10 +115,10 @@ public interface JobDao extends BaseDao {
           + "LIMIT :limit OFFSET :offset")
   List<Job> findAll(String namespaceName, int limit, int offset);
 
-  @SqlQuery("SELECT count(*) FROM jobs AS j")
+  @SqlQuery("SELECT count(*) FROM jobs_view AS j")
   int count(String namespaceName);
 
-  @SqlQuery("SELECT count(*) FROM jobs AS j WHERE j.namespace_name = :namespaceName")
+  @SqlQuery("SELECT count(*) FROM jobs_view AS j WHERE j.namespace_name = :namespaceName")
   int countFor(String namespaceName);
 
   default List<Job> findAllWithRun(String namespaceName, int limit, int offset) {

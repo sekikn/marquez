@@ -15,7 +15,6 @@ import lombok.NonNull;
 import marquez.common.Utils;
 import marquez.common.models.DatasetId;
 import marquez.common.models.Field;
-import marquez.common.models.JobName;
 import marquez.common.models.NamespaceName;
 import marquez.common.models.RunId;
 import marquez.common.models.RunState;
@@ -69,9 +68,9 @@ public interface RunDao extends BaseDao {
 
   String BASE_FIND_RUN_SQL =
       "SELECT r.*, ra.args, ctx.context, f.facets,\n"
-          + "jv.namespace_name, jv.job_name, jv.version AS job_version,\n"
+          + "jv.version AS job_version,\n"
           + "ri.input_versions, ro.output_versions\n"
-          + "FROM runs AS r\n"
+          + "FROM runs_view AS r\n"
           + "LEFT OUTER JOIN\n"
           + "(\n"
           + "    SELECT le.run_uuid, JSON_AGG(event->'run'->'facets') AS facets\n"
@@ -105,15 +104,15 @@ public interface RunDao extends BaseDao {
 
   @SqlQuery(
       "SELECT r.*, ra.args, ctx.context, f.facets,\n"
-          + "jv.namespace_name, jv.job_name, jv.version AS job_version,\n"
+          + "jv.version AS job_version,\n"
           + "ri.input_versions, ro.output_versions\n"
-          + "FROM runs AS r\n"
+          + "FROM runs_view AS r\n"
           + "LEFT OUTER JOIN\n"
           + "(\n"
           + "  SELECT le.run_uuid, JSON_AGG(event->'run'->'facets') AS facets\n"
           + "  FROM lineage_events le\n"
-          + "  INNER JOIN runs ON runs.uuid=le.run_uuid\n"
-          + "  WHERE runs.job_name=:jobName AND runs.namespace_name=:namespace\n"
+          + "  INNER JOIN runs_view r2 ON r2.uuid=le.run_uuid\n"
+          + "  WHERE r2.job_name=:jobName AND r2.namespace_name=:namespace\n"
           + "  GROUP BY le.run_uuid\n"
           + ") AS f ON r.uuid=f.run_uuid\n"
           + "LEFT OUTER JOIN run_args AS ra ON ra.uuid = r.run_args_uuid\n"
@@ -145,6 +144,7 @@ public interface RunDao extends BaseDao {
           + "external_id, "
           + "created_at, "
           + "updated_at, "
+          + "job_uuid, "
           + "job_version_uuid, "
           + "run_args_uuid, "
           + "nominal_start_time, "
@@ -160,6 +160,7 @@ public interface RunDao extends BaseDao {
           + ":externalId, "
           + ":now, "
           + ":now, "
+          + ":jobUuid,"
           + ":jobVersionUuid, "
           + ":runArgsUuid, "
           + ":nominalStartTime, "
@@ -183,6 +184,7 @@ public interface RunDao extends BaseDao {
       UUID runUuid,
       String externalId,
       Instant now,
+      UUID jobUuid,
       UUID jobVersionUuid,
       UUID runArgsUuid,
       Instant nominalStartTime,
@@ -200,6 +202,7 @@ public interface RunDao extends BaseDao {
           + "external_id, "
           + "created_at, "
           + "updated_at, "
+          + "job_uuid, "
           + "job_version_uuid, "
           + "run_args_uuid, "
           + "nominal_start_time, "
@@ -213,6 +216,7 @@ public interface RunDao extends BaseDao {
           + ":externalId, "
           + ":now, "
           + ":now, "
+          + ":jobUuid, "
           + ":jobVersionUuid, "
           + ":runArgsUuid, "
           + ":nominalStartTime, "
@@ -232,6 +236,7 @@ public interface RunDao extends BaseDao {
       UUID runUuid,
       String externalId,
       Instant now,
+      UUID jobUuid,
       UUID jobVersionUuid,
       UUID runArgsUuid,
       Instant nominalStartTime,
@@ -334,7 +339,7 @@ public interface RunDao extends BaseDao {
   /** Insert from run creates a run but does not associate any datasets. */
   @Transaction
   default RunRow upsertRunMeta(
-      NamespaceName namespaceName, JobName jobName, RunMeta runMeta, RunState currentState) {
+      NamespaceName namespaceName, JobRow jobRow, RunMeta runMeta, RunState currentState) {
     Instant now = Instant.now();
 
     NamespaceRow namespaceRow =
@@ -350,9 +355,6 @@ public interface RunDao extends BaseDao {
                 Utils.toJson(runMeta.getArgs()),
                 Utils.checksumFor(runMeta.getArgs()));
 
-    JobRow jobRow =
-        createJobDao().findJobByNameAsRow(namespaceName.getValue(), jobName.getValue()).get();
-
     UUID uuid = runMeta.getId().map(RunId::getValue).orElse(UUID.randomUUID());
 
     RunRow runRow =
@@ -360,6 +362,7 @@ public interface RunDao extends BaseDao {
             uuid,
             null,
             now,
+            jobRow.getUuid(),
             null,
             runArgsRow.getUuid(),
             runMeta.getNominalStartTime().orElse(null),
@@ -367,7 +370,7 @@ public interface RunDao extends BaseDao {
             currentState,
             now,
             namespaceRow.getName(),
-            jobName.getValue(),
+            jobRow.getName(),
             jobRow.getLocation(),
             jobRow.getJobContextUuid().orElse(null));
 
@@ -384,7 +387,7 @@ public interface RunDao extends BaseDao {
   @SqlQuery(
       BASE_FIND_RUN_SQL
           + "WHERE r.uuid=(\n"
-          + "    SELECT uuid FROM runs WHERE namespace_name = :namespace and job_name = :jobName\n"
+          + "    SELECT uuid FROM runs_view WHERE namespace_name = :namespace and job_name = :jobName\n"
           + "    ORDER BY transitioned_at DESC\n"
           + "    LIMIT 1\n"
           + ")")
